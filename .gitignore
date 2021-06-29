@@ -1,0 +1,6 @@
+.DS_Store
+*.pptx
+*.pdf
+*.exe
+baseline/linux
+baseline/mac
