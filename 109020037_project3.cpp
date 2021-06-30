@@ -6,6 +6,11 @@
 #include <ctime>
 using namespace std;
 
+int win_games = 0;
+int total_games = 0;
+float win_rate[20] = {0};
+int must_chosen = -1;
+
 #define DEPTH 7
 
 int player;
@@ -46,10 +51,7 @@ public:
     std::vector<Point> next_valid_spots;
     std::array<int, 3> disc_count;
     int cur_player;
-    bool done;
-    int winner;
     int n_valid_spots;
-    int force_no_move = 0;
 private:
     int get_next_player(int player) const {
         return 3 - player;
@@ -100,11 +102,10 @@ public:
         }
         n_valid_spots = b.n_valid_spots;
         cur_player = b.cur_player;
-        winner = b.winner;
-        done = b.done;
         for(int i=0;i<3;i++){
             disc_count[i] = b.disc_count[i];
         }
+        next_valid_spots.clear();
         for(int i=0;i<n_valid_spots;i++){
             Point p = b.next_valid_spots[i];
             next_valid_spots.push_back(p);
@@ -134,13 +135,6 @@ public:
         cur_player = get_next_player(cur_player);
         next_valid_spots = get_valid_spots();
         n_valid_spots = next_valid_spots.size();
-        // Check Win
-        if (next_valid_spots.size() == 0) {
-            force_no_move = 1;
-        }
-        else {
-            force_no_move = 0;
-        }
     }
     void flip_discs(Point center) {
         for (Point dir: directions) {
@@ -178,6 +172,7 @@ float tryit[64] = {16.16, -3.03, 0.99, 0.43, 0.43, 0.99, -3.03, 16.16,
                                  1.33, -0.04, 0.51, 0.07, 0.07, 0.51, -0.04, 1.33,
                                  -4.12, -1.81, -0.08, -0.27, -0.27, -0.08, -1.81, -4.12,
                                  16.16, -3.03, 0.99, 0.43, 0.43, 0.99, -3.03, 16.16};
+
                                  
 float state_value[SIZE][SIZE];
 
@@ -186,7 +181,7 @@ float calculate(OthelloBoard b){
     for(int i=0;i<SIZE;i++){
         for(int j=0;j<SIZE;j++){
             if(b.board[i][j] == player){
-                v += state_value[i][j] * 1;
+                v += state_value[i][j];
             }
             else if(b.board[i][j] == 0){
 
@@ -196,11 +191,9 @@ float calculate(OthelloBoard b){
             }
         }
     }
-    if(b.force_no_move == 1){
-        return v+100;
-    }
     return v;
 }
+
 
 float alphabeta(OthelloBoard b, int depth, float alpha, float beta, bool maximizingPlayer){
     if(depth <= 0){
@@ -240,13 +233,28 @@ float alphabeta(OthelloBoard b, int depth, float alpha, float beta, bool maximiz
     }
 }
 
+void find_win_rate(OthelloBoard b){
+    int total_disc = b.disc_count[player] + b.disc_count[3 - player];
+    if(total_disc == 64){
+        if(b.disc_count[player] > b.disc_count[3 - player]){
+            win_games += 1;
+        }
+        total_games += 1;
+        return;
+    }
+    for(int i=0;i<b.n_valid_spots;i++){
+        OthelloBoard new_b = b;;
+        new_b.put_disc(b.next_valid_spots[i]);
+        find_win_rate(new_b);
+    }
+
+}
+
+
 void read_board(std::ifstream& fin) {
     for(int i=0;i<3;i++){
         new_board.disc_count[i] = 0;
     }
-    new_board.done = false;
-    new_board.winner = -1;
-    new_board.force_no_move = 0;
     fin >> player;
     new_board.cur_player = player;
     for (int i = 0; i < SIZE; i++) {
@@ -274,7 +282,6 @@ void read_valid_spots(std::ifstream& fin) {
 
 void write_valid_spot(std::ofstream& fout) {
     int n_valid_spots = next_valid_spots.size();
-    srand(time(NULL));
     int chosen = 0;
     float max = -10000;
     float value[n_valid_spots];
@@ -288,30 +295,82 @@ void write_valid_spot(std::ofstream& fout) {
             chosen = i;
         }
     }
-    //chosen = 0;
     Point p = next_valid_spots[chosen];
-    // Remember to flush the output to ensure the last action is written to file.
     fout << p.x << " " << p.y << endl;
     chosen = 0;
+
+
+    int occupied = 0; 
+    occupied = new_board.disc_count[player] + new_board.disc_count[3 - player];
+
+    if(occupied >= 54){
+        total_games = 0;
+        win_games = 0;
+        for(int i=0;i<n_valid_spots;i++){
+            total_games = 0;
+            win_games = 0;
+            OthelloBoard tmp_board = new_board;
+            tmp_board.put_disc(next_valid_spots[i]);
+            find_win_rate(tmp_board);
+            if(total_games != 0){
+                if(win_games == total_games){
+                    must_chosen = i;
+                    break;
+                }
+                float tmp1, tmp2;
+                tmp1 = win_games;
+                tmp2 = total_games;
+                win_rate[i] = tmp1/tmp2;
+            }
+        }
+        if(must_chosen == -1){
+            float high = 0;
+            for(int i=0;i<n_valid_spots;i++){
+                if(win_rate[i] > high){
+                    chosen = i;
+                    high = win_rate[i];
+                }
+
+            }
+        }
+        else {
+            chosen = must_chosen;
+        }
+
+    }
     
-    float target_value;
-    target_value = alphabeta(new_board, DEPTH, -1000, 1000, true);
-    for(int i=0;i<n_valid_spots;i++){
-        float distance = global_chosen_array[i] - target_value;
-        if(global_chosen_array[i] == target_value || (distance < 0.001 && distance > -0.001)){
-            chosen = i;
-            //p = next_valid_spots[i];
-            //fout << p.x << " " << p.y << endl;
-            break;
+    else {
+        float target_value;
+        target_value = alphabeta(new_board, DEPTH, -1000, 1000, true);
+        for(int i=0;i<n_valid_spots;i++){
+            float distance = global_chosen_array[i] - target_value;
+            if(global_chosen_array[i] == target_value || (distance < 0.001 && distance > -0.001)){
+                chosen = i;
+                break;
+            }
         }
     }
 
-
-    // Choose random spot. (Not random uniform here)
-    //int index = (rand() % n_valid_spots);
     p = next_valid_spots[chosen];
-    // Remember to flush the output to ensure the last action is written to file.
     fout << p.x << " " << p.y << endl;
+
+    int force_to_win = -1;
+    for(int i=0;i<n_valid_spots;i++){
+        OthelloBoard tmp_board = new_board;
+        tmp_board.put_disc(next_valid_spots[i]);
+        if(tmp_board.n_valid_spots == 0){
+            tmp_board.cur_player = 3 - tmp_board.cur_player;
+            tmp_board.next_valid_spots = tmp_board.get_valid_spots();
+            if(tmp_board.next_valid_spots.size() == 0 && tmp_board.disc_count[player] > tmp_board.disc_count[3 - player]){
+                force_to_win = i;
+                break;
+            }
+        }
+    }
+    if(force_to_win != -1 && (force_to_win>=0 && force_to_win <=n_valid_spots)){
+        p = next_valid_spots[force_to_win];
+        fout << p.x << " " << p.y << endl;
+    }
     fout.flush();
 }
 
@@ -319,7 +378,6 @@ int main(int, char** argv) {
     for(int i=0;i<SIZE;i++){
         for(int j=0;j<SIZE;j++){
             state_value[i][j] = tryit[i *SIZE+j];
-            //state_value[i][j] = 1;
         }
     }
     std::ifstream fin(argv[1]);
